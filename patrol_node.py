@@ -8,17 +8,43 @@ from std_srvs.srv import Trigger
 from gazebo_msgs.srv import DeleteEntity
 from visualization_msgs.msg import Marker
 from tf_transformations import quaternion_from_euler
+from tf2_ros import Buffer, TransformListener
+import tf2_geometry_msgs
 
 # --- GLOBAL VARIABLES ---
 trash_pose = None
 trash_detected = False
+tf_buffer = None
+tf_listener = None
 
 def trash_callback(msg):
-    global trash_pose, trash_detected
+    global trash_pose, trash_detected, tf_buffer
+    
     if not trash_detected:
-        print("\n!!! TRASH RECEIVED !!!")
-        trash_pose = msg
-        trash_detected = True
+        # 1. Strip leading slashes to handle '/map' and 'map' the same way
+        incoming_frame = msg.header.frame_id.strip('/')
+        
+        print(f"\n!!! TRASH RECEIVED !!! Frame ID: '{incoming_frame}'")
+        
+        # 2. CHECK: If it is ALREADY 'map', accept it immediately.
+        if incoming_frame == 'map':
+            trash_pose = msg
+            trash_detected = True
+            print(f"   [Direct Map] Accepted: x={trash_pose.pose.position.x:.2f}, y={trash_pose.pose.position.y:.2f}")
+            return
+
+        # 3. OTHERWISE: Try to convert (e.g., from Camera)
+        try:
+            # Use Time() with seconds=0 to get the "Latest Available" transform
+            if tf_buffer.can_transform('map', msg.header.frame_id, rclpy.time.Time()):
+                trash_pose = tf_buffer.transform(msg, 'map')
+                trash_detected = True
+                print(f"   [Transformed] {incoming_frame} -> Map: x={trash_pose.pose.position.x:.2f}, y={trash_pose.pose.position.y:.2f}")
+            else:
+                print(f"   WARNING: TF Buffer cannot transform '{incoming_frame}' to 'map' yet.")
+                print("            (Wait 5 seconds for the robot to wake up and try again)")
+        except Exception as e:
+            print(f"   Transformation Error: {e}")
 
 def get_approach_pose(robot_pose, target_pose, distance_offset=0.5):
     """
@@ -58,8 +84,11 @@ def main():
     
     # 1. Setup Node and Clients
     node = rclpy.create_node('patrol_controller')
-    global trash_detected, trash_pose  # <--- FIX: Ensure we use global vars
-    
+    global tf_buffer, tf_listener, trash_detected, trash_pose  # <--- FIX: Ensure we use global vars
+
+    tf_buffer = Buffer()
+    tf_listener = TransformListener(tf_buffer, node)
+
     node.create_subscription(PoseStamped, '/trash_pose', trash_callback, 10)
     grasp_client = node.create_client(Trigger, '/grasp_trash')
     delete_client = node.create_client(DeleteEntity, '/delete_entity')
@@ -111,7 +140,8 @@ def main():
 
             # WHILE MOVING
             while not nav.isTaskComplete():
-                rclpy.spin_once(node, timeout_sec=0.1)
+                for _ in range(10):
+                    rclpy.spin_once(node, timeout_sec=0.01)
                 
                 # --- TRASH LOGIC ---
                 if trash_detected and trash_pose is not None:
