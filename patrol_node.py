@@ -5,6 +5,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from std_srvs.srv import Trigger
+from gazebo_msgs.srv import DeleteEntity
 from visualization_msgs.msg import Marker
 from tf_transformations import quaternion_from_euler
 
@@ -61,6 +62,7 @@ def main():
     
     node.create_subscription(PoseStamped, '/trash_pose', trash_callback, 10)
     grasp_client = node.create_client(Trigger, '/grasp_trash')
+    delete_client = node.create_client(DeleteEntity, '/delete_entity')
     marker_pub = node.create_publisher(Marker, 'approach_marker', 10)
 
     # 2. Start Navigator
@@ -98,6 +100,8 @@ def main():
         pose.pose.position.y = float(y)
         pose.pose.orientation.w = 1.0
         goal_poses.append(pose)
+
+    last_trash_can_pose = initial_pose
 
     # 4. Main Loop
     while True:
@@ -147,14 +151,36 @@ def main():
                     if result == TaskResult.SUCCEEDED:
                         print(">>> Arrived at trash. Telling Grasp Code to start...")
                         
-                        if not grasp_client.wait_for_service(timeout_sec=2.0):
-                            print("Warning: Grasp Service not available!")
-                        else:
+                        if grasp_client.wait_for_service(timeout_sec=2.0):
                             req = Trigger.Request()
                             future = grasp_client.call_async(req)
                             rclpy.spin_until_future_complete(node, future)
-                            res = future.result()
-                            print(f"Grasp Result: {res.message}")
+                            
+                            # 3. ALWAYS RETURN TO BIN (Regardless of result)
+                            print(f"   Navigating back to Bin at ({last_trash_can_pose.pose.position.x:.1f}, {last_trash_can_pose.pose.position.y:.1f})...")
+                            nav.goToPose(last_trash_can_pose)
+                            while not nav.isTaskComplete(): pass
+
+                            if nav.getResult() == TaskResult.SUCCEEDED:
+                                print("   At Bin. Throwing away trash (Deleting)...")
+                                
+                                # 4. DELETE MODEL
+                                del_req = DeleteEntity.Request()
+                                del_req.name = "pringles"  # Ensure this matches 'ros2 topic echo /gazebo/model_states'
+                                
+                                # Increase wait time to 2.0 seconds
+                                if delete_client.wait_for_service(timeout_sec=2.0):
+                                    del_future = delete_client.call_async(del_req)
+                                    rclpy.spin_until_future_complete(node, del_future)
+                                    
+                                    del_resp = del_future.result()
+                                    if del_resp.success:
+                                        print("   >>> SUCCESS: Trash Disposed (Deleted).")
+                                    else:
+                                        # If it fails, Gazebo will tell us why (e.g., "Model not found")
+                                        print(f"   !!! DELETE FAILED. Gazebo said: '{del_resp.status_message}'")
+                            else:
+                                print("   Failed to return to bin.")
                     else:
                         print(f"!!! FAILED to reach trash! Result: {result}")
                         print("Check RViz: Is the Red Sphere inside a wall or obstacle?")
@@ -168,6 +194,7 @@ def main():
             # Check waypoint result
             if nav.getResult() == TaskResult.SUCCEEDED:
                 print(f"Waypoint {i+1} reached.")
+                last_trash_can_pose = target_pose
 
     rclpy.shutdown()
 
