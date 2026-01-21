@@ -125,6 +125,7 @@ def main():
     grasp_client = node.create_client(Trigger, '/grasp_trash')
     delete_client = node.create_client(DeleteEntity, '/delete_entity')
     marker_pub = node.create_publisher(Marker, 'approach_marker', 10)
+    grasp_name_pub = node.create_publisher(String, '/grasp_target', 10)
 
     # 2. Start Navigator
     nav = BasicNavigator()
@@ -228,6 +229,10 @@ def main():
                         detected_trash_name = get_specific_model_name(trash_pose.pose.position.x, trash_pose.pose.position.y)
                         print(f">>> Arrived at {detected_trash_name} trash. Telling Grasp Code to start...")
                         
+                        name_msg = String()
+                        name_msg.data = detected_trash_name
+                        grasp_name_pub.publish(name_msg)
+
                         if grasp_client.wait_for_service(timeout_sec=2.0):
                             req = Trigger.Request()
                             future = grasp_client.call_async(req)
