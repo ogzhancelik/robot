@@ -75,7 +75,6 @@ def trash_callback(msg):
 
         # 3. OTHERWISE: Try to convert (e.g., from Camera)
         try:
-            # Use Time() with seconds=0 to get the "Latest Available" transform
             if tf_buffer.can_transform('map', msg.header.frame_id, rclpy.time.Time()):
                 trash_pose = tf_buffer.transform(msg, 'map')
                 trash_detected = True
@@ -124,7 +123,7 @@ def main():
     
     # 1. Setup Node and Clients
     node = rclpy.create_node('patrol_controller')
-    global tf_buffer, tf_listener, trash_detected, trash_pose  # <--- FIX: Ensure we use global vars
+    global tf_buffer, tf_listener, trash_detected, trash_pose
 
     tf_buffer = Buffer()
     tf_listener = TransformListener(tf_buffer, node)
@@ -213,7 +212,7 @@ def main():
                     
                     nav_success = False
                     
-                    for attempt in range(1, 4): # Try 1, 2, 3
+                    for attempt in range(1, 4): 
                         print(f"   [Attempt {attempt}/3] Navigating to trash...")
                         
                         nav.goToPose(safe_pose)
@@ -228,7 +227,7 @@ def main():
                         if result == TaskResult.SUCCEEDED:
                             print("   >>> NAVIGATION SUCCESS!")
                             nav_success = True
-                            break # Exit the retry loop
+                            break 
                         else:
                             print(f"   !!! Navigation Failed (Result: {result}). Retrying in 1s...")
                             time.sleep(0.5) # Give the costmap time to clear/update
