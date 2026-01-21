@@ -15,13 +15,10 @@ class EcoBotVision(Node):
         super().__init__('yolo_trash_detector')
         
         self.set_parameters([Parameter('use_sim_time', Parameter.Type.BOOL, True)])
-        # 1. Setup Publisher (Using PoseStamped)
         self.trash_pub = self.create_publisher(PoseStamped, '/trash_pose', 10)
         self.head_pub = self.create_publisher(JointTrajectory, '/head_controller/joint_trajectory', 10)
         
-        # 2. Setup Subscribers
-        # IMPORTANT: 'self.rgb_callback' is defined below. 
-        # If indentation is wrong, this line crashes.
+
         self.subscription = self.create_subscription(
             Image, '/head_front_camera/rgb/image_raw', self.rgb_callback, 10)
             
@@ -29,7 +26,6 @@ class EcoBotVision(Node):
             Image, '/head_front_camera/depth/image_raw', self.depth_callback, 10)
             
         self.bridge = CvBridge()
-        # Initialize YOLO (Using CPU to avoid memory crash)
         self.model = YOLO('yolo26m.pt') 
         self.latest_depth_frame = None
         
@@ -53,7 +49,7 @@ class EcoBotVision(Node):
         msg = JointTrajectory()
         msg.joint_names = ['head_1_joint', 'head_2_joint']
         point = JointTrajectoryPoint()
-        point.positions = [0.0, -0.5] # Look down
+        point.positions = [0.0, -0.5] 
         point.time_from_start = Duration(sec=1, nanosec=0)
         msg.points.append(point)
         self.head_pub.publish(msg)
@@ -91,7 +87,6 @@ class EcoBotVision(Node):
                                 # 4. Publish PoseStamped
                                 trash_msg = PoseStamped()
                                 trash_msg.header.stamp = self.get_clock().now().to_msg()
-                                # FRAME ID: Must match what we found in tf2_monitor earlier
                                 trash_msg.header.frame_id = "head_front_camera_color_optical_frame"
                                 
                                 trash_msg.pose.position.x = x_m
@@ -102,7 +97,7 @@ class EcoBotVision(Node):
                                 self.trash_pub.publish(trash_msg)
                                 self.get_logger().info(f'Trash Found! Z={z_m:.2f}m')
                         except Exception as e:
-                            pass # Ignore sporadic math errors
+                            pass
 
             # 5. Visualize
             annotated_frame = results[0].plot()
