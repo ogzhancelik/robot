@@ -130,8 +130,7 @@ def move_arm_to_joints(node, move_group_client, joint_positions, joint_names, to
     goal_msg.request.num_planning_attempts = 5
     goal_msg.request.allowed_planning_time = 5.0
     
-    # Don't use path constraints - just go directly to goal
-    goal_msg.request.path_constraints = Constraints()  # Empty path constraints
+    goal_msg.request.path_constraints = Constraints()
     
     node.get_logger().info('Sending goal to MoveGroup...')
     send_goal_future = move_group_client.send_goal_async(goal_msg)
@@ -185,8 +184,7 @@ class GraspTrashServer(Node):
         # MoveIt action client
         self.move_group_client = ActionClient(self, MoveGroup, '/move_action')
         
-        # Object name (should match Gazebo model name)
-        self.target_object_name = ""  # Default, can be overridden by /grasp_target topic
+        self.target_object_name = "pringles"  # Default, can be overridden by /grasp_target topic
         self.held_object_name = None
         self.holding_thread = None
         self.stop_holding = threading.Event()
