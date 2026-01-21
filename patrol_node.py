@@ -10,12 +10,43 @@ from visualization_msgs.msg import Marker
 from tf_transformations import quaternion_from_euler
 from tf2_ros import Buffer, TransformListener
 import tf2_geometry_msgs
+from gazebo_msgs.msg import ModelStates
+from std_msgs.msg import String
+import time
 
 # --- GLOBAL VARIABLES ---
 trash_pose = None
 trash_detected = False
 tf_buffer = None
 tf_listener = None
+latest_model_states = None
+
+def model_states_callback(msg):
+    global latest_model_states
+    latest_model_states = msg
+
+def get_specific_model_name(target_x, target_y):
+    global latest_model_states
+    if latest_model_states is None:
+        return None
+
+    closest_name = None
+    min_dist = 9999.0
+
+    # Loop through every object in the simulation
+    for i, name in enumerate(latest_model_states.name):            
+        # 2. Calculate distance to our target point
+        obj_x = latest_model_states.pose[i].position.x + 5
+        obj_y = latest_model_states.pose[i].position.y - 6
+        
+        dist = math.sqrt((obj_x - target_x)**2 + (obj_y - target_y)**2)
+        
+        # 3. Find the minimum
+        if dist < min_dist:
+            min_dist = dist
+            closest_name = name
+
+    return closest_name
 
 def trash_callback(msg):
     global trash_pose, trash_detected, tf_buffer
@@ -89,6 +120,7 @@ def main():
     tf_buffer = Buffer()
     tf_listener = TransformListener(tf_buffer, node)
 
+    node.create_subscription(ModelStates, '/gazebo/model_states', model_states_callback, 10)
     node.create_subscription(PoseStamped, '/trash_pose', trash_callback, 10)
     grasp_client = node.create_client(Trigger, '/grasp_trash')
     delete_client = node.create_client(DeleteEntity, '/delete_entity')
@@ -169,17 +201,32 @@ def main():
 
                     print(f"Approaching EXACT trash coords: ({safe_pose.pose.position.x:.2f}, {safe_pose.pose.position.y:.2f})")
                     
-                    # 1. GO DIRECTLY TO TRASH
-                    nav.goToPose(safe_pose)
+                    nav_success = False
                     
-                    # Wait for arrival
-                    while not nav.isTaskComplete():
-                        pass
+                    for attempt in range(1, 4): # Try 1, 2, 3
+                        print(f"   [Attempt {attempt}/3] Navigating to trash...")
+                        
+                        nav.goToPose(safe_pose)
+                        
+                        # Wait for arrival
+                        while not nav.isTaskComplete():
+                            pass
 
-                    # 2. Check Result
-                    result = nav.getResult()
-                    if result == TaskResult.SUCCEEDED:
-                        print(">>> Arrived at trash. Telling Grasp Code to start...")
+                        # Check Result
+                        result = nav.getResult()
+                        
+                        if result == TaskResult.SUCCEEDED:
+                            print("   >>> NAVIGATION SUCCESS!")
+                            nav_success = True
+                            break # Exit the retry loop
+                        else:
+                            print(f"   !!! Navigation Failed (Result: {result}). Retrying in 1s...")
+                            time.sleep(0.5) # Give the costmap time to clear/update
+
+                    # 2. PROCEED ONLY IF SUCCESSFUL
+                    if nav_success:
+                        detected_trash_name = get_specific_model_name(trash_pose.pose.position.x, trash_pose.pose.position.y)
+                        print(f">>> Arrived at {detected_trash_name} trash. Telling Grasp Code to start...")
                         
                         if grasp_client.wait_for_service(timeout_sec=2.0):
                             req = Trigger.Request()
@@ -196,7 +243,7 @@ def main():
                                 
                                 # 4. DELETE MODEL
                                 del_req = DeleteEntity.Request()
-                                del_req.name = "pringles"  # Ensure this matches 'ros2 topic echo /gazebo/model_states'
+                                del_req.name = detected_trash_name
                                 
                                 # Increase wait time to 2.0 seconds
                                 if delete_client.wait_for_service(timeout_sec=2.0):
